@@ -44,12 +44,12 @@ except ImportError:
 #   req.connection.notes does not contain the key 'NTLM_AUTHORIZED' and
 #   the cache does not contain any tuple under the connection's id.
 #
-# 2 Pending authentication: we sent the NTLM challenge to the client, and we 
+# 2 Pending authentication: we sent the NTLM challenge to the client, and we
 #   are waiting for the response. req.connection.notes does not contain the
 #   the key 'NTLM_AUTHORIZED' but the cache contains one tuple (NTLM_Proxy, timestamp)
 #   under the connection's id.
 #
-# 3 Authenticated: all steps completed successfully. 
+# 3 Authenticated: all steps completed successfully.
 #   req.connection.notes contains the key 'NTLM_AUTHORIZED' (username) or
 #   'BASIC_AUTHORIZED' (username and a password).
 #   The cache should not contain any tuple under the connection's id.
@@ -78,7 +78,7 @@ class CacheConnections:
         self._mutex.acquire()
         self._cache[id] = ( proxy, int(time.time()) )
         self._mutex.release()
-    
+
     def clean(self):
         now = int(time.time())
         self._mutex.acquire()
@@ -112,7 +112,7 @@ class CacheGroups:
             self._cache[group]={}
         self._cache[group][user]=int(time.time())
         self._mutex.release()
-    
+
     def clean(self):
         now = int(time.time())
         self._mutex.acquire()
@@ -140,6 +140,13 @@ class CacheGroups:
 cache = CacheConnections()
 cacheGroups = CacheGroups()
 
+def get_cache_id(req):
+    id_source = req.get_options().get('CacheId', 'id').lower()
+    if id_source == 'id':
+        return req.connection.id
+    if id_source == 'xforwardheader':
+        return req.headers_in['X-Forwarded-For']
+
 def ntlm_message_type(msg):
     if not msg.startswith('NTLMSSP\x00') or len(msg)<12:
         raise RuntimeError("Not a valid NTLM message: '%s'" % hexlify(msg))
@@ -153,7 +160,7 @@ def parse_ntlm_authenticate(msg):
 
     @return a tuple (username, domain)
     '''
-    
+
     NTLMSSP_NEGOTIATE_UNICODE = 0x00000001
     idx = 28
     length, offset = unpack('<HxxI', msg[idx:idx+8])
@@ -179,7 +186,7 @@ def set_remote_user(req, username, domain):
         req.user = req.user.lower()
     elif namecase == 'upper':
         req.user = req.user.upper()
-    
+
 
 def decode_http_authorization_header(auth):
     '''Return a tuple with the parsed content of an HTTP Authorization header
@@ -206,7 +213,7 @@ def handle_unauthorized(req):
     '''
     proxy_mode = req.get_options().get('WebProxyMode','off').lower() == 'on';
     req.err_headers_out.add('Proxy-Authenticate' if proxy_mode else 'WWW-Authenticate', 'NTLM')
-    if use_basic_auth:        
+    if use_basic_auth:
         req.err_headers_out.add('WWW-Authenticate', 'Basic realm="%s"' % req.auth_name())
     req.err_headers_out.add('Connection', 'close')
     return apache.HTTP_PROXY_AUTHENTICATION_REQUIRED if proxy_mode else apache.HTTP_UNAUTHORIZED
@@ -259,7 +266,7 @@ def handle_type1(req, ntlm_message):
     @req            The request that carried the message
     @ntlm_message   The actual Type1 message, in binary format
     '''
-    cache.remove(req.connection.id)
+    cache.remove(get_cache_id(req))
     cache.clean()
 
     try:
@@ -269,7 +276,7 @@ def handle_type1(req, ntlm_message):
 
     proxy_mode = req.get_options().get('WebProxyMode','off').lower() == 'on';
 
-    cache.add(req.connection.id, proxy)
+    cache.add(get_cache_id(req), proxy)
     req.err_headers_out.add('Proxy-Authenticate' if proxy_mode else 'WWW-Authenticate', "NTLM " + base64.b64encode(ntlm_challenge))
     return apache.HTTP_PROXY_AUTHENTICATION_REQUIRED if proxy_mode else apache.HTTP_UNAUTHORIZED
 
@@ -284,7 +291,7 @@ def check_authorization(req, username, proxy):
     Require group WER  authorizes any user which is member of the group WER.
                        Group membership is checked at the Active Directory
                        server.
-    
+
     Multiple users and groups can be specified on the same Require line,
     provided they are separated by a comma.
 
@@ -294,7 +301,7 @@ def check_authorization(req, username, proxy):
     @proxy      The proxy that keeps membership data.
     @return     True if the user is authorized, False otherwise.
     '''
-   
+
     rules = ''.join(req.requires()).strip()
     if rules=='' or rules=='valid-user' or cacheGroups.has(rules, username):
         req.log_error('PYNTLM: CACHED Membership check succeeded for %s in rule "%s" for URI %s.' %
@@ -337,8 +344,8 @@ def handle_type3(req, ntlm_message):
     @req            The request that carried the message
     @ntlm_message   The actual Type3 message, in binary format
     '''
-    
-    proxy = cache.get_proxy(req.connection.id)
+
+    proxy = cache.get_proxy(get_cache_id(req))
     try:
         user, domain = parse_ntlm_authenticate(ntlm_message)
         if not domain:
@@ -349,7 +356,7 @@ def handle_type3(req, ntlm_message):
         user, domain = 'invalid', 'invalid'
         result = False
     if not result:
-        cache.remove(req.connection.id)
+        cache.remove(get_cache_id(req))
         req.log_error('PYNTLM: User %s/%s authentication for URI %s' % (
             domain,user,req.unparsed_uri))
         return handle_unauthorized(req)
@@ -357,14 +364,14 @@ def handle_type3(req, ntlm_message):
     req.log_error('PYNTLM: User %s/%s has been authenticated to access URI %s' % (user,domain,req.unparsed_uri), apache.APLOG_INFO)
     set_remote_user(req, user, domain)
     result = check_authorization(req, user, proxy)
-    cache.remove(req.connection.id)
+    cache.remove(get_cache_id(req))
 
     if not result:
         return apache.HTTP_FORBIDDEN
 
     req.connection.notes.add('NTLM_AUTHORIZED',req.user)
     return apache.OK
-    
+
 def handle_basic(req, user, password):
     '''Handle a request authenticated using the Basic Access Authentication
     mechanism (RFC2617).
@@ -379,7 +386,7 @@ def handle_basic(req, user, password):
         (proxy, type2) = connect_to_proxy(req, type1)
     except Exception, e:
         return apache.HTTP_INTERNAL_SERVER_ERROR
-    
+
     client.parse_ntlm_challenge(type2)
     type3 = client.make_ntlm_authenticate()
     if not proxy.authenticate(type3):
@@ -387,7 +394,7 @@ def handle_basic(req, user, password):
         req.log_error('PYNTLM: User %s/%s failed Basic authentication for URI %s' % (
             user,domain,req.unparsed_uri))
         return handle_unauthorized(req)
-    
+
     req.log_error('PYNTLM: User %s/%s has been authenticated (Basic) to access URI %s' % (user,domain,req.unparsed_uri), apache.APLOG_INFO)
     set_remote_user(req, user, domain)
     result = check_authorization(req, user, proxy)
@@ -398,11 +405,11 @@ def handle_basic(req, user, password):
 
     req.connection.notes.add('BASIC_AUTHORIZED', user+password)
     return apache.OK
-    
+
 def authenhandler(req):
     '''The request handler called by mod_python in the authentication phase.'''
     req.log_error("PYNTLM: Handling connection 0x%X for %s URI %s. %d entries in connection cache." % (
-        req.connection.id, req.method,req.unparsed_uri,len(cache)), apache.APLOG_INFO)
+        get_cache_id(req), req.method,req.unparsed_uri,len(cache)), apache.APLOG_INFO)
 
     # Extract Authorization header, as a list (if present)
     proxy_mode = req.get_options().get('WebProxyMode','off').lower() == 'on';
@@ -423,12 +430,12 @@ def authenhandler(req):
         # For other methods, it is acceptable to return OK immediately.
         if  auth_headers:
             req.log_error('PYTNLM: Spurious authentication request on connection 0x%X. Method = %s. Content-Length = %d. Headers = %s' % (
-            req.connection.id, req.method, req.clength, auth_headers), apache.APLOG_INFO)
+            get_cache_id(req), req.method, req.clength, auth_headers), apache.APLOG_INFO)
             if req.method!='POST' or req.clength>0:
                 return apache.OK
         else:
             return apache.OK
-    
+
     # If there is no Authorization header it means it is the first request.
     # We reject it with a 401, indicating which authentication protocol we understand.
     if not auth_headers:
@@ -442,7 +449,7 @@ def authenhandler(req):
                 break
     except:
         ah_data = False
-    
+
     if not ah_data:
         req.log_error('Error when parsing Authorization header for URI %s' % req.unparsed_uri, apache.APLOG_ERR)
         return apache.HTTP_BAD_REQUEST
@@ -477,9 +484,9 @@ def authenhandler(req):
     try:
         ntlm_version = ntlm_message_type(ah_data[1])
         if ntlm_version==1:
-            return handle_type1(req, ah_data[1]) 
+            return handle_type1(req, ah_data[1])
         if ntlm_version==3:
-            if cache.has_key(req.connection.id):
+            if cache.has_key(get_cache_id(req)):
                 return handle_type3(req, ah_data[1])
             req.log_error('Unexpected NTLM message Type 3 in new connection for URI %s' %
                 (req.unparsed_uri), apache.APLOG_INFO)
@@ -490,4 +497,3 @@ def authenhandler(req):
     req.log_error('Incorrect NTLM message in Authorization header for URI %s: %s' %
             (req.unparsed_uri,error), apache.APLOG_ERR)
     return apache.HTTP_BAD_REQUEST
-

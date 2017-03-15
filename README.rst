@@ -90,7 +90,7 @@ Requirements
 
 Tests were carried out with:
 
-- a server with mod-python 3.3.1, Apache 2.2, and Python 2.6. 
+- a server with mod-python 3.3.1, Apache 2.2, and Python 2.6.
 - clients with Internet Explorer 7/8, Firefox 7.0, and Chrome.
 - Windows 2003 Domain Controller and Active Directory server
 
@@ -137,7 +137,7 @@ The following options exist:
 =====================================  ======
 Apache option                          Description
 =====================================  ======
-AuthType NTLM                          Always specify it like this.  
+AuthType NTLM                          Always specify it like this.
 Require valid-user                     Always specify it like this.
 Require user XYZ,WTY                   | Grants access only to users named XYZ or WTY.
                                        | Multiple "Require user" option lines can be specified.
@@ -157,6 +157,8 @@ PythonOption NameFmt SAM|LogOn         Set REMOTE_USER to the user name only (SA
                                        legacy Logon format (domain\username).
                                        This entry is optional. SAM is the default.
 PythonOption WebProxyMode ON	       Work in the context of mod_proxy requests (default is OFF)
+PythonOption CacheId id|xforwardheader Choose the cache dictionary id source between connection id
+                                        and X-Forwarded-For proxy header.
 =====================================  ======
 
 Apache needs to be configured to send keep alives (directive ``KeepAlive On``).
@@ -215,7 +217,7 @@ its credentials were correct, unless its name is included in a ``Require user``
 option.
 
 If you are working in a complex setup with multiple AD servers, you may want
-to connect to the global catalog (GC) instead of a single AD instance. 
+to connect to the global catalog (GC) instead of a single AD instance.
 Using the GC, group memberships will work across AD instances which often
 required in large organizations.
 
@@ -260,7 +262,7 @@ Check list:
 * If use SSL and cannot access using Internet Explorer but other browsers work,
   ensure that the ``User-Agent MSIE`` setting (see Usage above) is commented out
   in your site configuration.
-* Increase the level of verbosity for the Apache log up to ``Info``. Note that 
+* Increase the level of verbosity for the Apache log up to ``Info``. Note that
   the LogLevel may be specified in multiple places in the Apache configuration.
   Ensure you are not setting the log level too high in the directory hierarchy.
 * Ensure that mod-python is installed and activated. In the log file you should
@@ -279,11 +281,11 @@ Check list:
   at least if you use a DC. Use the ntlm_client.py utility with the same
   settings from the Apache configuration: ::
 
-   python PyAuthenNTLM2/ntlm_client.py -u johndoe -p xxxxx -d DOMAINX -a 10.11.12.13 
+   python PyAuthenNTLM2/ntlm_client.py -u johndoe -p xxxxx -d DOMAINX -a 10.11.12.13
 
   If you use an Active Directory server: ::
 
-   python PyAuthenNTLM2/ntlm_client.py -u johndoe -p xxxxx -d DOMAINX -a ldap://10.11.12.13 
+   python PyAuthenNTLM2/ntlm_client.py -u johndoe -p xxxxx -d DOMAINX -a ldap://10.11.12.13
 
   You should see the message: ::
 
